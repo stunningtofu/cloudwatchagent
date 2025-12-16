@@ -36,7 +36,6 @@ dir .\plugins\
 
 Buat file `C:\ProgramData\Amazon\AmazonCloudWatchAgent\config.json:`
 
-```json
 {
     "metrics": {
         "metrics_collected": {
@@ -46,30 +45,37 @@ Buat file `C:\ProgramData\Amazon\AmazonCloudWatchAgent\config.json:`
                     "utilization_memory",
                     "memory_used"
                 ],
-                "metrics_collection_interval": ,
-                    "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
-                    "ImageId": "${aws:ImageId}",
-                    "InstanceId": "${aws:InstanceId}",
-                    "InstanceType": "${aws:InstanceType}"
-                }
+                "metrics_collection_interval": 300
+            },
+            "Memory": {
+                "measurement": [
+                    "% Committed Bytes In Use",
+                    "Available MBytes"
+                ]
+            },
+            "LogicalDisk": {
+                "measurement": [
+                    "% Free Space",
+                    "Free Megabytes"
+                ],
+                "resources": ["*"]
+            },
+            "Processor": {
+                "measurement": ["% Processor Time"],
+                "resources": ["_Total"]
             }
         },
         "append_dimensions": {
+            "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+            "ImageId": "${aws:ImageId}",
             "InstanceId": "${aws:InstanceId}",
             "InstanceType": "${aws:InstanceType}"
         },
         "aggregation_dimensions": [["InstanceId"]],
         "force_flush_interval": 60
-    },
-    "logs": {
-        "logs_collected": {
-            "files": {
-                "collect_list": []
-            }
-        }
     }
 }
-```
+
 
 ### STEP 4: Konfigurasi dan Start Agent
 
@@ -82,8 +88,7 @@ cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 
 2. Apply konfigurasi
 ```shell
-.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config -m ec2 -s -c 
-file:"C:\ProgramData\Amazon\AmazonCloudWatchAgent\config.json"
+.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config -m ec2 -s -c file:"C:\ProgramData\Amazon\AmazonCloudWatchAgent\config.json"
 ```
 
 3. Start service
