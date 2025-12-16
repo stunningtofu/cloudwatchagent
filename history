@@ -1,0 +1,13 @@
+# Download FULL package dengan plugin
+$url = "https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.zip"
+$zipPath = "$env:TEMP\amazon-cloudwatch-agent.zip"
+$extractPath = "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+
+# Download
+Invoke-WebRequest -Uri $url -OutFile $zipPath
+
+# Extract
+Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+# Set path
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$extractPath", "Machine")
