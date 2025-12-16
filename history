@@ -11,4 +11,72 @@ msiexec /i amazon-cloudwatch-agent.msi
 # Or using PowerShell
 Start-Process msiexec.exe -Wait -ArgumentList '/i C:\AmazonCloudWatchAgent\amazon-cloudwatch-agent.msi /quiet /L*v C:\install.log'
 
+Step 3: Create Configuration File
+
+Create amazon-cloudwatch-agent.json in C:\Program Files\Amazon\AmazonCloudWatchAgent\:
+
+```json
+{
+    "metrics": {
+        "metrics_collected": {
+            "nvidia_gpu": {
+                "measurement": [
+                    "utilization_gpu",
+                    "utilization_memory",
+                    "memory_used"
+                ],
+                "metrics_collection_interval": ,
+                    "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+                    "ImageId": "${aws:ImageId}",
+                    "InstanceId": "${aws:InstanceId}",
+                    "InstanceType": "${aws:InstanceType}"
+                }
+            }
+        },
+        "append_dimensions": {
+            "InstanceId": "${aws:InstanceId}",
+            "InstanceType": "${aws:InstanceType}"
+        },
+        "aggregation_dimensions": [["InstanceId"]],
+        "force_flush_interval": 60
+    },
+    "logs": {
+        "logs_collected": {
+            "files": {
+                "collect_list": []
+            }
+        }
+    }
+}
+```
+
+step 4: generate Configuration
+
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+
+# Generate configuration from wizard
+.\amazon-cloudwatch-agent-config-wizard.exe
+
+# Or directly use your config file
+.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config -m ec2 -c file:"C:\Program Files\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -s
+
+step 5: Start CloudWatch Agent
+
+# Start the agent
+.\amazon-cloudwatch-agent-ctl.ps1 -a start
+
+# Check status
+.\amazon-cloudwatch-agent-ctl.ps1 -a status
+
+# Or using Windows Services
+Start-Service AmazonCloudWatchAgent
+Get-Service AmazonCloudWatchAgent
+
+step 6: Verify Data in CloudWatch
+
+Get-Service AmazonCloudWatchAgent
+
+Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 20
+
+
 
