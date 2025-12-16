@@ -15,7 +15,6 @@ Step 3: Create Configuration File
 
 Create amazon-cloudwatch-agent.json in C:\Program Files\Amazon\AmazonCloudWatchAgent\:
 
-```json
 {
     "metrics": {
         "metrics_collected": {
@@ -53,16 +52,9 @@ Create amazon-cloudwatch-agent.json in C:\Program Files\Amazon\AmazonCloudWatchA
         },
         "aggregation_dimensions": [["InstanceId"]],
         "force_flush_interval": 60
-    },
-    "logs": {
-        "logs_collected": {
-            "files": {
-                "collect_list": []
-            }
-        }
     }
 }
-```
+
 
 step 4: generate Configuration
 
@@ -73,6 +65,15 @@ cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 
 # Or directly use your config file
 .\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config -m ec2 -c file:"C:\Program Files\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -s
+
+# Cek status service
+Get-Service AmazonCloudWatchAgent
+
+# Cek logs terbaru
+Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 20
+
+# Atau gunakan script control
+.\amazon-cloudwatch-agent-ctl.ps1 -a status
 
 step 5: Start CloudWatch Agent
 
@@ -91,6 +92,3 @@ step 6: Verify Data in CloudWatch
 Get-Service AmazonCloudWatchAgent
 
 Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 20
-
-
-
