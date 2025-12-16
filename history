@@ -1,13 +1,14 @@
-# Download FULL package dengan plugin
-$url = "https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.zip"
-$zipPath = "$env:TEMP\amazon-cloudwatch-agent.zip"
-$extractPath = "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+# Create directory for CloudWatch Agent
+mkdir C:\AmazonCloudWatchAgent
+cd C:\AmazonCloudWatchAgent
 
-# Download
-Invoke-WebRequest -Uri $url -OutFile $zipPath
+# Download the CloudWatch Agent
+Invoke-WebRequest https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.msi -OutFile amazon-cloudwatch-agent.msi
 
-# Extract
-Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+# Install CloudWatch Agent
+msiexec /i amazon-cloudwatch-agent.msi
 
-# Set path
-[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$extractPath", "Machine")
+# Or using PowerShell
+Start-Process msiexec.exe -Wait -ArgumentList '/i C:\AmazonCloudWatchAgent\amazon-cloudwatch-agent.msi /quiet /L*v C:\install.log'
+
+
