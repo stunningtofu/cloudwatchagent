@@ -1,39 +1,41 @@
 {
-    "metrics": {
-        "metrics_collected": {
-            "nvidia_gpu": {
-                "measurement": [
-                    "utilization_gpu",
-                    "utilization_memory",
-                    "memory_used"
-                ],
-                "metrics_collection_interval": 300
-            },
-            "Memory": {
-                "measurement": [
-                    "% Committed Bytes In Use",
-                    "Available MBytes"
-                ]
-            },
-            "LogicalDisk": {
-                "measurement": [
-                    "% Free Space",
-                    "Free Megabytes"
-                ],
-                "resources": ["*"]
-            },
-            "Processor": {
-                "measurement": ["% Processor Time"],
-                "resources": ["_Total"]
-            }
-        },
-        "append_dimensions": {
-            "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
-            "ImageId": "${aws:ImageId}",
-            "InstanceId": "${aws:InstanceId}",
-            "InstanceType": "${aws:InstanceType}"
-        },
-        "aggregation_dimensions": [["InstanceId"]],
-        "force_flush_interval": 60
-    }
+  "metrics": {
+    "namespace": "Custom/Windows",
+    "metrics_collected": {
+      "nvidia_gpu": {
+        "measurement": [
+          "utilization_gpu",
+          "utilization_memory",
+          "memory_used",
+          "memory_total"
+        ],
+        "metrics_collection_interval": 300
+      },
+      "Memory": {
+        "measurement": [
+          "% Committed Bytes In Use",
+          "Available MBytes"
+        ]
+      },
+      "LogicalDisk": {
+        "measurement": [
+          "% Free Space",
+          "Free Megabytes"
+        ],
+        "resources": ["*"]
+      },
+      "Processor": {
+        "measurement": ["% Processor Time"],
+        "resources": ["_Total"]
+      }
+    },
+    "append_dimensions": {
+      "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+      "ImageId": "${aws:ImageId}",
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}"
+    },
+    "aggregation_dimensions": [["InstanceId"]],
+    "force_flush_interval": 60
+  }
 }
