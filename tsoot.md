@@ -1,150 +1,30 @@
-Service tidak bisa start karena ada masalah dengan konfigurasi atau service itu sendiri. Mari kita troubleshoot step by step:
+Terlihat control script versi lama tidak support `install` action. Mari kita perbaiki dengan cara manual.
 
-## **LANGKAH 1: CHECK KONFIGURASI FILE**
-
-```powershell
-# Cek apakah config file ada
-Test-Path "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
-
-# Lihat isi config file
-Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
-
-# Cek syntax JSON valid
-try {
-    $config = Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" | ConvertFrom-Json
-    Write-Host "✓ JSON syntax valid" -ForegroundColor Green
-} catch {
-    Write-Host "✗ JSON syntax invalid: $_" -ForegroundColor Red
-}
-```
-
-## **LANGKAH 2: TEST KONFIGURASI DENGAN AGENT CONTROL**
+## **LANGKAH 1: INSTALL SERVICE MANUAL**
 
 ```powershell
-# Navigasi ke folder agent
+# Coba install service dengan command langsung
 cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 
-# Test konfigurasi dengan control script
-.\amazon-cloudwatch-agent-ctl.ps1 -a config
+# Coba jalankan executable yang digunakan service
+.\start-amazon-cloudwatch-agent.exe
+
+# Atau coba buat service manual
+sc.exe create "AmazonCloudWatchAgent" `
+  binPath= "\"C:\Program Files\Amazon\AmazonCloudWatchAgent\start-amazon-cloudwatch-agent.exe\"" `
+  DisplayName= "Amazon CloudWatch Agent" `
+  start= "auto" `
+  depend= "Tcpip/Dhcp/Dnscache"
+
+# Set service description
+sc.exe description "AmazonCloudWatchAgent" "Collects metrics and logs and sends them to Amazon CloudWatch"
 ```
 
-## **LANGKAH 3: CHECK SERVICE DETAILS**
+## **LANGKAH 2: GUNAKAN CONFIG YANG LEBIH SIMPLE LAGI**
 
 ```powershell
-# Cek detail service
-sc.exe queryex "AmazonCloudWatchAgent"
-
-# Cek konfigurasi service
-sc.exe qc "AmazonCloudWatchAgent"
-
-# Cek apakah service ada
-Get-Service -Name "AmazonCloudWatchAgent" -ErrorAction SilentlyContinue
-```
-
-## **LANGKAH 4: FIX SERVICE - METHOD 1 (Uninstall/Reinstall)**
-
-```powershell
-# Stop service jika masih ada
-Stop-Service -Name "AmazonCloudWatchAgent" -Force -ErrorAction SilentlyContinue
-
-# Uninstall service
-sc.exe delete "AmazonCloudWatchAgent"
-
-# Tunggu
-Start-Sleep -Seconds 5
-
-# Reinstall service dari config
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-.\amazon-cloudwatch-agent-ctl.ps1 -a install
-```
-
-## **LANGKAH 5: FIX SERVICE - METHOD 2 (Manual Config)**
-
-### **5.1 Buat Config yang SUPER SIMPLE:**
-```powershell
-# Buat config paling sederhana
-$superSimpleConfig = @'
-{
-  "metrics": {
-    "metrics_collected": {
-      "Processor": {
-        "measurement": [
-          "% Processor Time"
-        ]
-      }
-    }
-  }
-}
-'@
-
-$superSimpleConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
-```
-
-### **5.2 Uninstall dan Install Ulang Service:**
-```powershell
-# Navigasi ke folder agent
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-
-# Uninstall service
-.\amazon-cloudwatch-agent-ctl.ps1 -a stop
-.\amazon-cloudwatch-agent-ctl.ps1 -a uninstall
-
-# Tunggu
-Start-Sleep -Seconds 3
-
-# Install ulang
-.\amazon-cloudwatch-agent-ctl.ps1 -a install
-
-# Start
-.\amazon-cloudwatch-agent-ctl.ps1 -a start
-```
-
-## **LANGKAH 6: FIX SERVICE - METHOD 3 (Windows Service Fix)**
-
-```powershell
-# Cek dependencies
-Get-Service -Name "AmazonCloudWatchAgent" -DependentServices
-
-# Repair service dengan PowerShell
-$service = Get-WmiObject -Class Win32_Service -Filter "Name='AmazonCloudWatchAgent'"
-if ($service) {
-    $service.ChangeStartMode("Automatic")
-    $service.StartService()
-}
-
-# Atau coba start via sc.exe
-sc.exe start "AmazonCloudWatchAgent"
-```
-
-## **LANGKAH 7: CHECK EVENT LOGS UNTUK ERROR DETAIL**
-
-```powershell
-# Cek Windows Event Logs untuk error detail
-Get-WinEvent -LogName "Application" -MaxEvents 20 | 
-Where-Object {$_.ProviderName -like "*CloudWatch*" -or $_.Message -like "*CloudWatch*"} | 
-Select-Object TimeCreated, LevelDisplayName, ProviderName, Message | 
-Format-Table -AutoSize
-
-# Cek System logs juga
-Get-WinEvent -LogName "System" -MaxEvents 20 | 
-Where-Object {$_.Message -like "*CloudWatch*" -or $_.Message -like "*Amazon*"} | 
-Select-Object TimeCreated, LevelDisplayName, ProviderName, Message | 
-Format-Table -AutoSize
-```
-
-## **LANGKAH 8: ALTERNATIF - CLEAN INSTALL**
-
-```powershell
-# 1. Stop and disable service
-Stop-Service -Name "AmazonCloudWatchAgent" -Force -ErrorAction SilentlyContinue
-Set-Service -Name "AmazonCloudWatchAgent" -StartupType Disabled -ErrorAction SilentlyContinue
-
-# 2. Delete config files
-Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\*" -Force -ErrorAction SilentlyContinue
-
-# 3. Create VERY basic config
-$basicConfig = @'
+# Buat config yang sangat simple
+$simpleConfig = @'
 {
   "logs": {
     "logs_collected": {
@@ -152,129 +32,207 @@ $basicConfig = @'
         "collect_list": []
       }
     }
+  },
+  "metrics": {
+    "metrics_collected": {
+      "cpu": {
+        "resources": ["*"],
+        "measurement": [
+          {"name": "cpu_usage_active", "unit": "Percent"}
+        ],
+        "totalcpu": false
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}"
+    }
   }
 }
 '@
 
-$basicConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+$simpleConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+```
 
-# 4. Try to configure with wizard
+## **LANGKAH 3: START SERVICE**
+
+```powershell
+# Start service
+sc.exe start "AmazonCloudWatchAgent"
+
+# Atau via PowerShell
+Start-Service -Name "AmazonCloudWatchAgent"
+
+# Cek status
+sc.exe query "AmazonCloudWatchAgent"
+Get-Service -Name "AmazonCloudWatchAgent"
+```
+
+## **LANGKAH 4: JIKA MASIH ERROR, COBA RUN MANUAL DULU**
+
+```powershell
+# Run agent secara manual untuk debugging
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+
+# Coba run agent langsung (akan output error ke console)
+.\amazon-cloudwatch-agent.exe --config "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" --console
+```
+
+## **LANGKAH 5: ALTERNATIF - USE telegraf_win_perf_counters**
+
+```powershell
+# Config menggunakan telegraf plugin yang tersedia
+$telegrafConfig = @'
+{
+  "metrics": {
+    "namespace": "GPU/Monitoring",
+    "metrics_collected": {
+      "telegraf": {
+        "telegraf_metrics_input_interval": "60s",
+        "telegraf_metrics_plugin_config": [
+          {
+            "name": "win_perf_counters",
+            "config": [
+              "[[inputs.win_perf_counters]]",
+              "  [[inputs.win_perf_counters.object]]",
+              "    ObjectName = \"Processor\"",
+              "    Instances = [\"_Total\"]",
+              "    Counters = [\"% Processor Time\"]",
+              "    Measurement = \"cpu\"",
+              "  [[inputs.win_perf_counters.object]]",
+              "    ObjectName = \"GPU Engine\"",
+              "    Instances = [\"* engtype_3D\"]",
+              "    Counters = [\"Utilization Percentage\"]",
+              "    Measurement = \"gpu\""
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+'@
+
+$telegrafConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+```
+
+## **LANGKAH 6: FIX DENGAN MENGGUNAKAN DEFAULT CONFIG**
+
+```powershell
+# Coba gunakan config default dari agent
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+
+# Copy default config
+Copy-Item ".\config\config.json" "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Force
+
+# Atau generate config default
+$defaultConfig = @'
+{
+  "agent": {
+    "region": "us-east-1"
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\Logs\\amazon-cloudwatch-agent.log",
+            "log_group_name": "amazon-cloudwatch-agent.log",
+            "log_stream_name": "{instance_id}"
+          }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "metrics_collected": {
+      "statsd": {}
+    }
+  }
+}
+'@
+
+$defaultConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+```
+
+## **LANGKAH 7: COBA ACTION YANG TERSEDIA DI CONTROL SCRIPT**
+
+```powershell
+# Coba action yang tersedia
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+
+# Cek status
+.\amazon-cloudwatch-agent-ctl.ps1 -a status
+
+# Start
+.\amazon-cloudwatch-agent-ctl.ps1 -a start
+
+# Fetch config
+.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config --c file:"C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
+```
+
+## **LANGKAH 8: SOLUSI PASTI - UNINSTALL & REINSTALL**
+
+```powershell
+# 1. Uninstall agent dari Programs and Features
+#    atau gunakan:
+msiexec /x "{B1F0E1D7-0DF6-4B2D-B8A0-1B3D5D05D9E7}" /quiet
+
+# 2. Download versi terbaru
+$url = "https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.msi"
+$output = "$env:TEMP\cloudwatch-agent.msi"
+Invoke-WebRequest -Uri $url -OutFile $output
+
+# 3. Install
+msiexec /i $output /quiet /norestart
+
+# 4. Tunggu
+Start-Sleep -Seconds 30
+
+# 5. Gunakan wizard config
 cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 .\amazon-cloudwatch-agent-config-wizard.exe
 ```
 
-## **LANGKAH 9: QUICK FIX - USE DEFAULT CONFIG**
+## **LANGKAH 9: QUICK WORKAROUND - PowerShell Script Saja**
+
+Jika agent tetap tidak bisa, gunakan PowerShell script saja:
 
 ```powershell
-# Copy default config dari installation folder
-Copy-Item "C:\Program Files\Amazon\AmazonCloudWatchAgent\config.json" "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Force
-
-# Start service
-Start-Service -Name "AmazonCloudWatchAgent" -ErrorAction SilentlyContinue
-
-# Jika masih error, coba via net command
-net start AmazonCloudWatchAgent
-```
-
-## **LANGKAH 10: MANUAL START PROCESS**
-
-```powershell
-# Coba start process manual tanpa service
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-
-# Start agent langsung
-.\amazon-cloudwatch-agent.exe --config "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
-
-# Atau dengan control script mode console
-.\amazon-cloudwatch-agent-ctl.ps1 -a run
-```
-
-## **LANGKAH 11: VERIFIKASI PATH DAN PERMISSIONS**
-
-```powershell
-# Cek permissions pada folder
-Get-Acl "C:\ProgramData\Amazon\AmazonCloudWatchAgent" | Format-List
-
-# Cek apakah ada di PATH
-$env:Path -split ';' | Select-String "Amazon"
-
-# Cek file agent
-Get-ChildItem "C:\Program Files\Amazon\AmazonCloudWatchAgent" | Select-Object Name, Length, LastWriteTime
-```
-
-## **SOLUSI CEPAT - Run ini sebagai Administrator:**
-
-```powershell
-# SOLUSI CEPAT - Run semua command ini sebagai Administrator:
-
-# 1. Stop dan disable service
-Stop-Service AmazonCloudWatchAgent -Force -ErrorAction SilentlyContinue
-sc.exe delete AmazonCloudWatchAgent
-
-# 2. Hapus config lama
-Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Force -ErrorAction SilentlyContinue
-
-# 3. Buat config baru SANGAT sederhana
-@'
-{
-  "metrics": {
-    "metrics_collected": {
-      "cpu": {
-        "measurement": [
-          "cpu_usage_idle"
-        ],
-        "metrics_collection_interval": 60
-      }
-    }
-  }
+# Save sebagai: C:\Scripts\monitor-gpu.ps1
+while ($true) {
+    $gpuInfo = nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv,noheader,nounits
+    $metrics = $gpuInfo -split ','
+    
+    # Log ke file
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - GPU: $($metrics[0])%, Mem: $($metrics[1])%, Used: $($metrics[2]) MB, Total: $($metrics[3]) MB, Free: $($metrics[4]) MB" | 
+        Out-File "C:\GPU-Monitor.log" -Append
+    
+    # Tunggu 60 detik
+    Start-Sleep -Seconds 60
 }
-'@ | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
-
-# 4. Install service baru
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-.\amazon-cloudwatch-agent-ctl.ps1 -a install
-
-# 5. Start service
-.\amazon-cloudwatch-agent-ctl.ps1 -a start
-
-# 6. Cek status
-Get-Service AmazonCloudWatchAgent
 ```
 
-## **Jika MASIH ERROR, coba ini:**
+## **RUN INI SEBAGAI ADMINISTRATOR:**
 
 ```powershell
-# FULL RESET
-# Run sebagai Administrator
+# 1. Delete service yang rusak
+sc.exe delete "AmazonCloudWatchAgent"
 
-# 1. Uninstall CloudWatch Agent dari Control Panel
-# 2. Atau gunakan: 
-msiexec /x "C:\Program Files\Amazon\AmazonCloudWatchAgent\uninstall.exe" /quiet
+# 2. Buat config super simple
+@'{"metrics":{"metrics_collected":{"cpu":{"measurement":["cpu_usage_idle"]}}}}'@ | 
+    Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
 
-# 3. Download dan install ulang
-$url = "https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.msi"
-$output = "$env:TEMP\amazon-cloudwatch-agent.msi"
-Invoke-WebRequest -Uri $url -OutFile $output
-msiexec /i $output /quiet /norestart
+# 3. Coba start agent langsung (bukan sebagai service)
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+Start-Process -FilePath ".\amazon-cloudwatch-agent.exe" -ArgumentList "--config `"C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json`"" -NoNewWindow
 
-# 4. Tunggu install selesai
-Start-Sleep -Seconds 30
+# 4. Tunggu 10 detik
+Start-Sleep -Seconds 10
 
-# 5. Buat config sederhana
-@'
-{
-  "metrics": {
-    "metrics_collected": {
-      "Processor": {
-        "measurement": ["% Processor Time"]
-      }
-    }
-  }
-}
-'@ | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
-
-# 6. Start service
-Start-Service -Name "AmazonCloudWatchAgent"
+# 5. Cek apakah process berjalan
+Get-Process -Name "amazon-cloudwatch-agent" -ErrorAction SilentlyContinue
 ```
 
-**Coba step by step dari atas, dan beritahu saya error di step mana!**
+**Coba langkah-langkah di atas dan beritahu saya hasilnya!**
