@@ -1,46 +1,34 @@
-Terlihat control script versi lama tidak support `install` action. Mari kita perbaiki dengan cara manual.
+Ada error di JSON config! Ada karakter yang tidak valid. Mari kita perbaiki:
 
-## **LANGKAH 1: INSTALL SERVICE MANUAL**
+## **MASALAH:** JSON config corrupt atau ada karakter yang tidak valid
+
+## **LANGKAH 1: HAPUS DAN BUAT ULANG CONFIG FILE**
 
 ```powershell
-# Coba install service dengan command langsung
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+# Hapus config file yang corrupt
+Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Force
 
-# Coba jalankan executable yang digunakan service
-.\start-amazon-cloudwatch-agent.exe
+# Hapus juga file config lainnya
+Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\*.toml" -Force -ErrorAction SilentlyContinue
+Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\*.json" -Force -ErrorAction SilentlyContinue
 
-# Atau coba buat service manual
-sc.exe create "AmazonCloudWatchAgent" `
-  binPath= "\"C:\Program Files\Amazon\AmazonCloudWatchAgent\start-amazon-cloudwatch-agent.exe\"" `
-  DisplayName= "Amazon CloudWatch Agent" `
-  start= "auto" `
-  depend= "Tcpip/Dhcp/Dnscache"
-
-# Set service description
-sc.exe description "AmazonCloudWatchAgent" "Collects metrics and logs and sends them to Amazon CloudWatch"
+# Buat folder Logs jika belum ada
+New-Item -ItemType Directory -Path "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs" -Force
 ```
 
-## **LANGKAH 2: GUNAKAN CONFIG YANG LEBIH SIMPLE LAGI**
+## **LANGKAH 2: BUAT CONFIG YANG BENAR-BENAR VALID**
 
 ```powershell
-# Buat config yang sangat simple
-$simpleConfig = @'
+# Buat config JSON yang benar
+$validConfig = @'
 {
-  "logs": {
-    "logs_collected": {
-      "files": {
-        "collect_list": []
-      }
-    }
-  },
   "metrics": {
     "metrics_collected": {
-      "cpu": {
-        "resources": ["*"],
+      "Processor": {
         "measurement": [
-          {"name": "cpu_usage_active", "unit": "Percent"}
+          "% Processor Time"
         ],
-        "totalcpu": false
+        "metrics_collection_interval": 60
       }
     },
     "append_dimensions": {
@@ -51,188 +39,174 @@ $simpleConfig = @'
 }
 '@
 
-$simpleConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+# Save dengan encoding yang benar
+$validConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
 ```
 
-## **LANGKAH 3: START SERVICE**
+## **LANGKAH 3: VALIDASI JSON KEMBALI**
 
 ```powershell
-# Start service
-sc.exe start "AmazonCloudWatchAgent"
+# Test membaca JSON
+$testConfig = Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Raw
+Write-Host "Config length: $($testConfig.Length) characters"
 
-# Atau via PowerShell
-Start-Service -Name "AmazonCloudWatchAgent"
-
-# Cek status
-sc.exe query "AmazonCloudWatchAgent"
-Get-Service -Name "AmazonCloudWatchAgent"
-```
-
-## **LANGKAH 4: JIKA MASIH ERROR, COBA RUN MANUAL DULU**
-
-```powershell
-# Run agent secara manual untuk debugging
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-
-# Coba run agent langsung (akan output error ke console)
-.\amazon-cloudwatch-agent.exe --config "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" --console
-```
-
-## **LANGKAH 5: ALTERNATIF - USE telegraf_win_perf_counters**
-
-```powershell
-# Config menggunakan telegraf plugin yang tersedia
-$telegrafConfig = @'
-{
-  "metrics": {
-    "namespace": "GPU/Monitoring",
-    "metrics_collected": {
-      "telegraf": {
-        "telegraf_metrics_input_interval": "60s",
-        "telegraf_metrics_plugin_config": [
-          {
-            "name": "win_perf_counters",
-            "config": [
-              "[[inputs.win_perf_counters]]",
-              "  [[inputs.win_perf_counters.object]]",
-              "    ObjectName = \"Processor\"",
-              "    Instances = [\"_Total\"]",
-              "    Counters = [\"% Processor Time\"]",
-              "    Measurement = \"cpu\"",
-              "  [[inputs.win_perf_counters.object]]",
-              "    ObjectName = \"GPU Engine\"",
-              "    Instances = [\"* engtype_3D\"]",
-              "    Counters = [\"Utilization Percentage\"]",
-              "    Measurement = \"gpu\""
-            ]
-          }
-        ]
-      }
+# Test parse JSON
+try {
+    $parsed = $testConfig | ConvertFrom-Json
+    Write-Host "✓ JSON valid!" -ForegroundColor Green
+    $parsed.metrics.metrics_collected
+} catch {
+    Write-Host "✗ JSON invalid: $_" -ForegroundColor Red
+    
+    # Tampilkan karakter masalah
+    for ($i = 0; $i -lt [math]::Min($testConfig.Length, 100); $i++) {
+        $char = $testConfig[$i]
+        $ascii = [int][char]$char
+        Write-Host "Position $i : '$char' (ASCII: $ascii)"
     }
-  }
 }
+```
+
+## **LANGKAH 4: GUNAKAN CONFIG YANG LEBIH SEDERHANA**
+
+```powershell
+# Config yang sangat minimal
+$minimalConfig = @'
+{}
 '@
 
-$telegrafConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+$minimalConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
 ```
 
-## **LANGKAH 6: FIX DENGAN MENGGUNAKAN DEFAULT CONFIG**
+## **LANGKAH 5: COBA START DENGAN CONFIG MINIMAL**
 
 ```powershell
-# Coba gunakan config default dari agent
 cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 
-# Copy default config
-Copy-Item ".\config\config.json" "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Force
+# Coba start dengan config kosong
+.\start-amazon-cloudwatch-agent.exe
 
-# Atau generate config default
-$defaultConfig = @'
-{
-  "agent": {
-    "region": "us-east-1"
-  },
-  "logs": {
-    "logs_collected": {
-      "files": {
-        "collect_list": [
-          {
-            "file_path": "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\Logs\\amazon-cloudwatch-agent.log",
-            "log_group_name": "amazon-cloudwatch-agent.log",
-            "log_stream_name": "{instance_id}"
-          }
-        ]
-      }
-    }
-  },
-  "metrics": {
-    "metrics_collected": {
-      "statsd": {}
-    }
-  }
-}
-'@
-
-$defaultConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+# Atau langsung jalankan agent
+.\amazon-cloudwatch-agent.exe --config "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
 ```
 
-## **LANGKAH 7: COBA ACTION YANG TERSEDIA DI CONTROL SCRIPT**
+## **LANGKAH 6: BUAT CONFIG MENGGUNAKAN WIZARD**
 
 ```powershell
-# Coba action yang tersedia
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+# Hapus semua config
+Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\*" -Force -ErrorAction SilentlyContinue
 
-# Cek status
-.\amazon-cloudwatch-agent-ctl.ps1 -a status
-
-# Start
-.\amazon-cloudwatch-agent-ctl.ps1 -a start
-
-# Fetch config
-.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config --c file:"C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
-```
-
-## **LANGKAH 8: SOLUSI PASTI - UNINSTALL & REINSTALL**
-
-```powershell
-# 1. Uninstall agent dari Programs and Features
-#    atau gunakan:
-msiexec /x "{B1F0E1D7-0DF6-4B2D-B8A0-1B3D5D05D9E7}" /quiet
-
-# 2. Download versi terbaru
-$url = "https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.msi"
-$output = "$env:TEMP\cloudwatch-agent.msi"
-Invoke-WebRequest -Uri $url -OutFile $output
-
-# 3. Install
-msiexec /i $output /quiet /norestart
-
-# 4. Tunggu
-Start-Sleep -Seconds 30
-
-# 5. Gunakan wizard config
+# Jalankan wizard config
 cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 .\amazon-cloudwatch-agent-config-wizard.exe
 ```
 
-## **LANGKAH 9: QUICK WORKAROUND - PowerShell Script Saja**
+**Jika wizard tidak ada, coba ini:**
 
-Jika agent tetap tidak bisa, gunakan PowerShell script saja:
+## **LANGKAH 7: MANUAL FIX - EDIT FILE LANGSUNG**
 
 ```powershell
-# Save sebagai: C:\Scripts\monitor-gpu.ps1
-while ($true) {
-    $gpuInfo = nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv,noheader,nounits
-    $metrics = $gpuInfo -split ','
-    
-    # Log ke file
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - GPU: $($metrics[0])%, Mem: $($metrics[1])%, Used: $($metrics[2]) MB, Total: $($metrics[3]) MB, Free: $($metrics[4]) MB" | 
-        Out-File "C:\GPU-Monitor.log" -Append
-    
-    # Tunggu 60 detik
-    Start-Sleep -Seconds 60
+# Buka Notepad sebagai Administrator
+notepad "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
+
+# Hapus SEMUA isi file, lalu copy-paste ini:
+```
+
+```json
+{
+  "metrics": {
+    "metrics_collected": {
+      "cpu": {
+        "measurement": [
+          "cpu_usage_idle"
+        ],
+        "metrics_collection_interval": 60
+      }
+    }
+  }
 }
 ```
 
-## **RUN INI SEBAGAI ADMINISTRATOR:**
+**Save file dan tutup Notepad.**
+
+## **LANGKAH 8: TEST DENGAN POWERSHELL COMMAND LANGSUNG**
 
 ```powershell
-# 1. Delete service yang rusak
-sc.exe delete "AmazonCloudWatchAgent"
+# Test config file
+$configPath = "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
 
-# 2. Buat config super simple
-@'{"metrics":{"metrics_collected":{"cpu":{"measurement":["cpu_usage_idle"]}}}}'@ | 
-    Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+# Baca file sebagai teks biasa
+$content = Get-Content $configPath -Raw
+Write-Host "=== FILE CONTENT ==="
+$content
+Write-Host "=== END CONTENT ==="
 
-# 3. Coba start agent langsung (bukan sebagai service)
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-Start-Process -FilePath ".\amazon-cloudwatch-agent.exe" -ArgumentList "--config `"C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json`"" -NoNewWindow
-
-# 4. Tunggu 10 detik
-Start-Sleep -Seconds 10
-
-# 5. Cek apakah process berjalan
-Get-Process -Name "amazon-cloudwatch-agent" -ErrorAction SilentlyContinue
+# Cek karakter tersembunyi
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($content)
+Write-Host "`nFirst 50 bytes:"
+$bytes[0..49] | ForEach-Object { Write-Host "$_ : [$(if($_ -eq 10){'LF'}elseif($_ -eq 13){'CR'}elseif($_ -lt 32){'CTRL'}else{[char]$_})]" }
 ```
 
-**Coba langkah-langkah di atas dan beritahu saya hasilnya!**
+## **LANGKAH 9: BUAT FILE BARU DENGAN POWERSHELL**
+
+```powershell
+# Hapus file lama
+Remove-Item $configPath -Force
+
+# Buat dengan method yang lebih clean
+[System.IO.File]::WriteAllText($configPath, '{}', [System.Text.Encoding]::UTF8)
+
+# Test
+.\start-amazon-cloudwatch-agent.exe
+```
+
+## **LANGKAH 10: ONE-LINE FIX**
+
+```powershell
+# Run sebagai Administrator
+[System.IO.File]::WriteAllText("C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json", '{"metrics":{"metrics_collected":{"cpu":{"measurement":["cpu_usage_idle"]}}}}', [System.Text.Encoding]::UTF8); cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"; .\start-amazon-cloudwatch-agent.exe
+```
+
+## **LANGKAH 11: JIKA MASIH ERROR, GUNAKAN CONFIG TOML**
+
+```powershell
+# Agent juga support TOML format
+$tomlConfig = @'
+[agent]
+  interval = "60s"
+
+[[outputs.cloudwatch]]
+  region = "us-east-1"
+  namespace = "GPU/Monitoring"
+
+[[inputs.cpu]]
+  percpu = false
+  totalcpu = true
+'@
+
+$tomlConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.toml" -Encoding UTF8 -Force
+
+# Coba start dengan TOML
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+.\amazon-cloudwatch-agent.exe --config "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.toml"
+```
+
+## **SOLUSI CEPAT - COPY PASTE INI DI POWERSHELL:**
+
+```powershell
+# 1. Hapus semua config
+Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\*" -Force
+
+# 2. Buat config baru dengan cara yang benar
+$configJson = '{"metrics":{"metrics_collected":{"cpu":{"measurement":["cpu_usage_idle"],"metrics_collection_interval":60}}}}'
+[System.IO.File]::WriteAllText("C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json", $configJson, [System.Text.Encoding]::UTF8)
+
+# 3. Verifikasi
+Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json"
+
+# 4. Start agent
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
+.\start-amazon-cloudwatch-agent.exe
+```
+
+**Coba langkah 11 (SOLUSI CEPAT) dulu!** Error sebelumnya karena ada karakter tidak valid di JSON file.
