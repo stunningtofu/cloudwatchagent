@@ -1,196 +1,328 @@
-Baik. Berdasarkan **output PowerShell** yang Anda lampirkan dan fakta bahwa Anda **sudah menggunakan JSON final**, berikut analisis teknis dan langkah perbaikan yang **terbukti relevan untuk Windows Server + NVIDIA GPU**.
+# **CARA MANUAL IMPLEMENTASI CLOUDWATCH AGENT untuk GPU MONITORING**
 
----
+## **LANGKAH 1: PREPARASI**
 
-## 1. Kesimpulan Utama dari Log (Poin Penting)
+### **1.1 Buka PowerShell sebagai Administrator**
+- Klik **Start Menu**
+- Ketik **PowerShell**
+- Klik kanan → **Run as Administrator**
 
-Dari log:
+### **1.2 Cek Status Agent Saat Ini**
+```powershell
+# Cek service CloudWatch Agent
+Get-Service -Name "AmazonCloudWatchAgent"
 
-```
-Configuration validation succeeded
-AmazonCloudWatchAgent has been stopped
-Start-Service : Failed to start service 'Amazon CloudWatch Agent'
-```
+# Cek apakah agent berjalan
+sc query "AmazonCloudWatchAgent"
 
-Artinya:
-
-✅ **JSON VALID** (schema & syntax tidak bermasalah)
-❌ **Service gagal start setelah validasi**
-
-Masalah **BUKAN** pada JSON, tetapi pada **runtime dependency CloudWatch Agent di Windows**.
-
----
-
-## 2. Penyebab Paling Umum (Urutan Prioritas)
-
-### 🔴 1️⃣ NVIDIA NVML Library Tidak Terdeteksi oleh Service
-
-CloudWatch Agent **menggunakan NVML** (`nvml.dll`) untuk membaca GPU metric.
-
-Pada Windows:
-
-* Driver NVIDIA **harus ter-install dengan benar**
-* `nvml.dll` **harus bisa diakses oleh service account (LocalSystem)**
-
-⚠️ Fakta penting:
-
-> `nvidia-smi` bisa jalan di PowerShell **≠** CloudWatch Agent bisa akses NVML
-
----
-
-### 🔴 2️⃣ Path NVIDIA Tidak Masuk Environment Variable SYSTEM
-
-Service Windows **tidak mewarisi PATH user**.
-
-Jika:
-
-```
-C:\Program Files\NVIDIA Corporation\NVSMI
+# Backup konfigurasi lama jika ada
+Copy-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json.backup" -Force
 ```
 
-tidak ada di **SYSTEM PATH**, service akan gagal start **tanpa error detail di console**.
-
 ---
 
-### 🟠 3️⃣ Konflik Versi CloudWatch Agent (GPU Plugin Bug)
-
-Beberapa versi agent **gagal start** jika:
-
-* `nvidia_gpu` aktif
-* tetapi NVML gagal di-load
-
----
-
-## 3. Langkah Troubleshooting (WAJIB Ikuti Urutan)
-
----
-
-### ✅ STEP 1 — Verifikasi NVIDIA Driver (SYSTEM Context)
-
-Jalankan **sebagai Administrator**:
+## **LANGKAH 2: STOP AGENT**
 
 ```powershell
-& "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-```
+# Stop service CloudWatch Agent
+Stop-Service -Name "AmazonCloudWatchAgent" -Force
 
-Jika gagal → **driver belum valid**
+# Tunggu 5 detik
+Start-Sleep -Seconds 5
+
+# Verifikasi sudah stop
+Get-Service -Name "AmazonCloudWatchAgent"
+```
 
 ---
 
-### ✅ STEP 2 — Pastikan NVML DLL Ada
+## **LANGKAH 3: BUAT FILE KONFIGURASI**
 
-Cek file berikut:
+### **3.1 Buka Notepad atau Text Editor**
+- Tekan **Windows + R**
+- Ketik **notepad** → Enter
+
+### **3.2 Copy-Paste Konfigurasi Ini:**
+```json
+{
+  "agent": {
+    "run_as_user": "root",
+    "region": "${aws:Region}",
+    "debug": false,
+    "metrics_collection_interval": 60
+  },
+  "metrics": {
+    "namespace": "GPU/Monitoring",
+    "metrics_collected": {
+      "nvidia_gpu": {
+        "measurement": [
+          "utilization_gpu",
+          "utilization_memory",
+          "memory_total",
+          "memory_free",
+          "memory_used"
+        ],
+        "metrics_collection_interval": 60,
+        "append_dimensions": {
+          "gpu_name": "${nvidia_gpu:0:name}",
+          "gpu_uuid": "${nvidia_gpu:0:uuid}"
+        }
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}",
+      "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+      "ImageId": "${aws:ImageId}",
+      "Region": "${aws:Region}"
+    },
+    "aggregation_dimensions": [
+      ["InstanceId"],
+      ["InstanceId", "InstanceType"],
+      ["AutoScalingGroupName"]
+    ],
+    "force_flush_interval": 30
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\Logs\\amazon-cloudwatch-agent.log",
+            "log_group_name": "GPU-Agent-Logs",
+            "log_stream_name": "{instance_id}",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    },
+    "log_stream_name": "{instance_id}",
+    "force_flush_interval": 15
+  }
+}
+```
+
+### **3.3 Save File ke Lokasi yang Tepat:**
+- **File name:** `amazon-cloudwatch-agent.json`
+- **Save as type:** `All Files (*.*)`
+- **Save location:** `C:\ProgramData\Amazon\AmazonCloudWatchAgent\`
+
+**Atau gunakan PowerShell untuk membuat file:**
 
 ```powershell
-Get-ChildItem "C:\Program Files\NVIDIA Corporation\NVSMI\nvml.dll"
-```
+# Buat folder jika belum ada
+New-Item -ItemType Directory -Path "C:\ProgramData\Amazon\AmazonCloudWatchAgent" -Force
 
-Jika **tidak ada**, driver install **tidak lengkap**.
+# Buat file konfigurasi
+@'
+{
+  "agent": {
+    "run_as_user": "root",
+    "region": "${aws:Region}",
+    "debug": false,
+    "metrics_collection_interval": 60
+  },
+  "metrics": {
+    "namespace": "GPU/Monitoring",
+    "metrics_collected": {
+      "nvidia_gpu": {
+        "measurement": [
+          "utilization_gpu",
+          "utilization_memory",
+          "memory_total",
+          "memory_free",
+          "memory_used"
+        ],
+        "metrics_collection_interval": 60,
+        "append_dimensions": {
+          "gpu_name": "${nvidia_gpu:0:name}",
+          "gpu_uuid": "${nvidia_gpu:0:uuid}"
+        }
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}",
+      "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+      "ImageId": "${aws:ImageId}",
+      "Region": "${aws:Region}"
+    },
+    "aggregation_dimensions": [
+      ["InstanceId"],
+      ["InstanceId", "InstanceType"],
+      ["AutoScalingGroupName"]
+    ],
+    "force_flush_interval": 30
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\Logs\\amazon-cloudwatch-agent.log",
+            "log_group_name": "GPU-Agent-Logs",
+            "log_stream_name": "{instance_id}",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    },
+    "log_stream_name": "{instance_id}",
+    "force_flush_interval": 15
+  }
+}
+'@ | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+```
 
 ---
 
-### ✅ STEP 3 — Tambahkan NVIDIA ke SYSTEM PATH (KRITIS)
-
-Jalankan:
+## **LANGKAH 4: START AGENT**
 
 ```powershell
-setx /M PATH "$($env:PATH);C:\Program Files\NVIDIA Corporation\NVSMI"
+# Start service
+Start-Service -Name "AmazonCloudWatchAgent"
+
+# Tunggu 10 detik untuk inisialisasi
+Start-Sleep -Seconds 10
+
+# Cek status
+Get-Service -Name "AmazonCloudWatchAgent"
 ```
-
-⚠️ `/M` wajib → SYSTEM environment variable
-
-**REBOOT INSTANCE setelah ini**
 
 ---
 
-### ✅ STEP 4 — Jalankan Agent Manual untuk Error Detail
+## **LANGKAH 5: VERIFIKASI**
 
+### **5.1 Cek Status Service**
 ```powershell
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent\"
-.\amazon-cloudwatch-agent.exe -config "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Configs\amazon-cloudwatch-agent.toml" -debug
+# Cek apakah service berjalan
+Get-Service -Name "AmazonCloudWatchAgent" | Format-Table Name, Status, DisplayName
 ```
 
-Jika NVML gagal, Anda akan melihat error seperti:
-
-```
-Failed to initialize NVML
-```
-
----
-
-### ✅ STEP 5 — Cek Log Resmi CloudWatch Agent
-
+### **5.2 Cek Process Agent**
 ```powershell
-Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 100
+# Cek apakah process agent berjalan
+Get-Process -Name "AmazonCloudWatchAgent" -ErrorAction SilentlyContinue
 ```
 
-Cari keyword:
-
-* `nvidia`
-* `nvml`
-* `panic`
-* `plugin failed`
-
----
-
-## 4. Quick Isolation Test (Sangat Disarankan)
-
-Untuk memastikan **root cause = GPU plugin**, lakukan test berikut:
-
-### 🔧 Nonaktifkan Sementara NVIDIA Metric
-
-Edit JSON → **hapus blok `nvidia_gpu`**
-Restart agent:
-
+### **5.3 Cek Logs**
 ```powershell
-.\amazon-cloudwatch-agent-ctl.ps1 -a stop
-.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config -m ec2 -c file:"C:\Program Files\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -s
+# Lihat log terakhir (tunggu 30 detik dulu)
+Start-Sleep -Seconds 30
+
+# Buka log file
+notepad "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log"
+
+# Atau lihat via PowerShell
+Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 20
 ```
 
-Jika **service berhasil start** → 100% masalah di NVML / driver / PATH.
+### **5.4 Test GPU Detection Manual**
+```powershell
+# Test apakah NVIDIA GPU terdeteksi
+nvidia-smi
+
+# Test metrics spesifik
+nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv
+```
 
 ---
 
-## 5. Best Practice untuk EC2 GPU Windows
+## **LANGKAH 6: TROUBLESHOOTING**
 
-### ✅ Gunakan Driver Resmi AWS (WAJIB)
+### **Jika Agent Gagal Start:**
 
-Untuk instance seperti **g4dn / g5**:
+#### **6.1 Cek Error di Event Viewer:**
+```powershell
+# Buka Event Viewer
+eventvwr.msc
 
-* Gunakan **AWS NVIDIA Driver**, bukan dari nvidia.com
-* Install via:
+# Atau cek via PowerShell
+Get-WinEvent -LogName "Application" | Where-Object {$_.ProviderName -like "*CloudWatch*"} | Select-Object -First 5 TimeCreated, LevelDisplayName, Message
+```
 
-  * EC2 Driver Page
-  * AWS Marketplace AMI GPU
+#### **6.2 Test Konfigurasi:**
+```powershell
+# Navigasi ke folder agent
+cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
 
-AWS driver sudah:
+# Test konfigurasi
+.\amazon-cloudwatch-agent-ctl.ps1 -a config
+```
 
-* Compatible dengan NVML
-* Tested untuk CloudWatch Agent
+#### **6.3 Restart Manual:**
+```powershell
+# Stop
+Stop-Service -Name "AmazonCloudWatchAgent" -Force
+
+# Start ulang
+Start-Service -Name "AmazonCloudWatchAgent"
+```
 
 ---
 
-## 6. Ringkasan Diagnostik
+## **LANGKAH 7: TEST METRICS DI CLOUDWATCH**
 
-| Komponen         | Status                 |
-| ---------------- | ---------------------- |
-| JSON Config      | ✅ VALID                |
-| Schema           | ✅ OK                   |
-| CloudWatch Agent | ❌ Gagal start          |
-| Root Cause       | 🔴 NVML / NVIDIA Path  |
-| Fix Utama        | ➕ SYSTEM PATH + Reboot |
+### **7.1 Tunggu 2-3 Menit** untuk data pertama masuk
+
+### **7.2 Cek di AWS Console:**
+1. Buka **AWS Management Console**
+2. Pilih **CloudWatch**
+3. Klik **Metrics** → **All metrics**
+4. Cari namespace: **`GPU/Monitoring`**
+5. Metrics yang harus muncul:
+   - `utilization_gpu`
+   - `utilization_memory`
+   - `memory_total`
+   - `memory_free`
+   - `memory_used`
+
+### **7.3 Atau Cek via AWS CLI:**
+```powershell
+# Install AWS CLI dulu jika belum
+# Download dari: https://aws.amazon.com/cli/
+
+# Configure AWS CLI
+aws configure
+
+# Cek metrics di CloudWatch
+aws cloudwatch list-metrics --namespace "GPU/Monitoring"
+```
 
 ---
 
-## 7. Langkah Selanjutnya (Saya Bisa Bantu)
+## **LANGKAH 8: MONITORING RUTIN**
 
-Saya bisa langsung bantu jika Anda ingin:
+### **8.1 Buat Script Monitoring Sederhana:**
+```powershell
+# Save sebagai: C:\Scripts\monitor-gpu.ps1
+Write-Host "=== GPU Monitoring Status ===" -ForegroundColor Cyan
 
-* 🔍 Analisa **amazon-cloudwatch-agent.log**
-* 📊 Template **CloudWatch Dashboard GPU**
-* 🚨 Alarm GPU idle / overload
-* 🧪 Validasi untuk **g4dn vs g5**
-* 🪟 Best practice Windows GPU AMI AWS
+# 1. Service Status
+$service = Get-Service -Name "AmazonCloudWatchAgent"
+Write-Host "Agent Status: $($service.Status)" -ForegroundColor $(if($service.Status -eq "Running"){"Green"}else{"Red"})
 
-Silakan lanjutkan dengan:
-**hasil STEP 4 atau STEP 5**, saya akan breakdown error-nya secara presisi.
+# 2. Current GPU Metrics
+Write-Host "`nCurrent GPU Metrics:" -ForegroundColor Yellow
+nvidia-smi --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv
+
+# 3. Log Check
+Write-Host "`nLatest Logs:" -ForegroundColor Yellow
+$logFile = "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log"
+if (Test-Path $logFile) {
+    Get-Content $logFile -Tail 3
+}
+
+Write-Host "`nCheck CloudWatch Console:" -ForegroundColor Magenta
+Write-Host "Namespace: GPU/Monitoring" -ForegroundColor White
+```
+
+### **8.2 Jadwalkan Monitoring:**
+```powershell
+# Buat scheduled task (opsional)
+$action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-File C:\Scripts\monitor-gpu.ps1"
+$trigger = New-ScheduledTaskTrigger -Daily -At "9:00AM"
+Register-ScheduledTask -TaskName "GPU-Monitoring-Check" -Action $action -Trigger $trigger -Description "Check GPU Monitoring Status"
+```
