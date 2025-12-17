@@ -1,28 +1,62 @@
-# RUN SEMUA INI SEBAGAI ADMINISTRATOR:
+$script = @'
+while ($true) {
+    try {
+        # Get GPU metrics
+        $gpuInfo = nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv,noheader,nounits
+        $metrics = $gpuInfo -split ','
+        
+        # Get instance ID
+        $instanceId = (Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/instance-id" -ErrorAction Stop).Trim()
+        
+        # Send to CloudWatch
+        aws cloudwatch put-metric-data `
+            --namespace "GPU/Monitoring" `
+            --metric-name "GPU_Utilization" `
+            --value $metrics[0] `
+            --unit "Percent" `
+            --dimensions "InstanceId=$instanceId"
+            
+        aws cloudwatch put-metric-data `
+            --namespace "GPU/Monitoring" `
+            --metric-name "GPU_Memory_Utilization" `
+            --value $metrics[1] `
+            --unit "Percent" `
+            --dimensions "InstanceId=$instanceId"
+            
+        aws cloudwatch put-metric-data `
+            --namespace "GPU/Monitoring" `
+            --metric-name "GPU_Memory_Used" `
+            --value $metrics[2] `
+            --unit "Megabytes" `
+            --dimensions "InstanceId=$instanceId"
+            
+        aws cloudwatch put-metric-data `
+            --namespace "GPU/Monitoring" `
+            --metric-name "GPU_Memory_Total" `
+            --value $metrics[3] `
+            --unit "Megabytes" `
+            --dimensions "InstanceId=$instanceId"
+            
+        aws cloudwatch put-metric-data `
+            --namespace "GPU/Monitoring" `
+            --metric-name "GPU_Memory_Free" `
+            --value $metrics[4] `
+            --unit "Megabytes" `
+            --dimensions "InstanceId=$instanceId"
+            
+        Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Metrics sent" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Error: $_" -ForegroundColor Red
+    }
+    
+    # Wait 60 seconds
+    Start-Sleep -Seconds 60
+}
+'@
 
-# 1. Hapus semua config
-Remove-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\*" -Recurse -Force
+# Save script
+$script | Out-File "C:\Scripts\gpu-monitor.ps1" -Encoding UTF8 -Force
 
-# 2. Buat folder
-New-Item -ItemType Directory -Path "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs" -Force
-
-# 3. Buat config JSON SANGAT SIMPLE
-$config = '{"metrics":{"metrics_collected":{"statsd":{"service_address":":8125"}}}}'
-[System.IO.File]::WriteAllText("C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json", $config, [System.Text.Encoding]::UTF8)
-
-# 4. Buat common-config.toml yang benar
-@'
-[agent]
-  interval = "60s"
-  logfile = "C:\\\\ProgramData\\\\Amazon\\\\AmazonCloudWatchAgent\\\\Logs\\\\amazon-cloudwatch-agent.log"
-'@ | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\common-config.toml" -Encoding UTF8
-
-# 5. Hapus service jika ada
-sc.exe delete "AmazonCloudWatchAgent" 2>$null
-
-# 6. Jalankan agent langsung (tanpa service dulu)
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-Start-Process -FilePath ".\amazon-cloudwatch-agent.exe" -ArgumentList "--config `"C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json`" --mode auto" -NoNewWindow -Wait
-
-# 7. Cek process
-Get-Process -Name "amazon-cloudwatch-agent" -ErrorAction SilentlyContinue
+# Run as background job
+Start-Job -FilePath "C:\Scripts\gpu-monitor.ps1" -Name "GPU-Monitor"
