@@ -1,328 +1,274 @@
-# **CARA MANUAL IMPLEMENTASI CLOUDWATCH AGENT untuk GPU MONITORING**
+Error masih terjadi karena **versi agent lama** tidak support `nvidia_gpu` receiver. Agent Anda versi `1.300062.0b1394` tidak punya plugin NVIDIA. Mari kita perbaiki.
 
-## **LANGKAH 1: PREPARASI**
+## **SOLUSI: Gunakan Konfigurasi yang Support Versi Agent Lama**
 
-### **1.1 Buka PowerShell sebagai Administrator**
-- Klik **Start Menu**
-- Ketik **PowerShell**
-- Klik kanan → **Run as Administrator**
-
-### **1.2 Cek Status Agent Saat Ini**
+### **LANGKAH 1: Stop Agent**
 ```powershell
-# Cek service CloudWatch Agent
-Get-Service -Name "AmazonCloudWatchAgent"
-
-# Cek apakah agent berjalan
-sc query "AmazonCloudWatchAgent"
-
-# Backup konfigurasi lama jika ada
-Copy-Item "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json.backup" -Force
-```
-
----
-
-## **LANGKAH 2: STOP AGENT**
-
-```powershell
-# Stop service CloudWatch Agent
 Stop-Service -Name "AmazonCloudWatchAgent" -Force
-
-# Tunggu 5 detik
-Start-Sleep -Seconds 5
-
-# Verifikasi sudah stop
-Get-Service -Name "AmazonCloudWatchAgent"
+Start-Sleep -Seconds 3
 ```
 
----
-
-## **LANGKAH 3: BUAT FILE KONFIGURASI**
-
-### **3.1 Buka Notepad atau Text Editor**
-- Tekan **Windows + R**
-- Ketik **notepad** → Enter
-
-### **3.2 Copy-Paste Konfigurasi Ini:**
-```json
+### **LANGKAH 2: Buat Konfigurasi Sederhana (Tanpa NVIDIA GPU Dulu)**
+```powershell
+# Buat config minimal dulu untuk test agent
+$simpleConfig = @'
 {
-  "agent": {
-    "run_as_user": "root",
-    "region": "${aws:Region}",
-    "debug": false,
-    "metrics_collection_interval": 60
-  },
   "metrics": {
     "namespace": "GPU/Monitoring",
     "metrics_collected": {
-      "nvidia_gpu": {
-        "measurement": [
-          "utilization_gpu",
-          "utilization_memory",
-          "memory_total",
-          "memory_free",
-          "memory_used"
-        ],
-        "metrics_collection_interval": 60,
-        "append_dimensions": {
-          "gpu_name": "${nvidia_gpu:0:name}",
-          "gpu_uuid": "${nvidia_gpu:0:uuid}"
-        }
+      "Processor": {
+        "measurement": ["% Processor Time"],
+        "metrics_collection_interval": 60
       }
-    },
-    "append_dimensions": {
-      "InstanceId": "${aws:InstanceId}",
-      "InstanceType": "${aws:InstanceType}",
-      "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
-      "ImageId": "${aws:ImageId}",
-      "Region": "${aws:Region}"
-    },
-    "aggregation_dimensions": [
-      ["InstanceId"],
-      ["InstanceId", "InstanceType"],
-      ["AutoScalingGroupName"]
-    ],
-    "force_flush_interval": 30
-  },
-  "logs": {
-    "logs_collected": {
-      "files": {
-        "collect_list": [
-          {
-            "file_path": "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\Logs\\amazon-cloudwatch-agent.log",
-            "log_group_name": "GPU-Agent-Logs",
-            "log_stream_name": "{instance_id}",
-            "timestamp_format": "%Y-%m-%d %H:%M:%S",
-            "timezone": "UTC"
-          }
-        ]
-      }
-    },
-    "log_stream_name": "{instance_id}",
-    "force_flush_interval": 15
+    }
   }
 }
+'@
+
+$simpleConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
 ```
 
-### **3.3 Save File ke Lokasi yang Tepat:**
-- **File name:** `amazon-cloudwatch-agent.json`
-- **Save as type:** `All Files (*.*)`
-- **Save location:** `C:\ProgramData\Amazon\AmazonCloudWatchAgent\`
-
-**Atau gunakan PowerShell untuk membuat file:**
-
+### **LANGKAH 3: Start Agent dengan Config Sederhana**
 ```powershell
-# Buat folder jika belum ada
-New-Item -ItemType Directory -Path "C:\ProgramData\Amazon\AmazonCloudWatchAgent" -Force
-
-# Buat file konfigurasi
-@'
-{
-  "agent": {
-    "run_as_user": "root",
-    "region": "${aws:Region}",
-    "debug": false,
-    "metrics_collection_interval": 60
-  },
-  "metrics": {
-    "namespace": "GPU/Monitoring",
-    "metrics_collected": {
-      "nvidia_gpu": {
-        "measurement": [
-          "utilization_gpu",
-          "utilization_memory",
-          "memory_total",
-          "memory_free",
-          "memory_used"
-        ],
-        "metrics_collection_interval": 60,
-        "append_dimensions": {
-          "gpu_name": "${nvidia_gpu:0:name}",
-          "gpu_uuid": "${nvidia_gpu:0:uuid}"
-        }
-      }
-    },
-    "append_dimensions": {
-      "InstanceId": "${aws:InstanceId}",
-      "InstanceType": "${aws:InstanceType}",
-      "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
-      "ImageId": "${aws:ImageId}",
-      "Region": "${aws:Region}"
-    },
-    "aggregation_dimensions": [
-      ["InstanceId"],
-      ["InstanceId", "InstanceType"],
-      ["AutoScalingGroupName"]
-    ],
-    "force_flush_interval": 30
-  },
-  "logs": {
-    "logs_collected": {
-      "files": {
-        "collect_list": [
-          {
-            "file_path": "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\Logs\\amazon-cloudwatch-agent.log",
-            "log_group_name": "GPU-Agent-Logs",
-            "log_stream_name": "{instance_id}",
-            "timestamp_format": "%Y-%m-%d %H:%M:%S",
-            "timezone": "UTC"
-          }
-        ]
-      }
-    },
-    "log_stream_name": "{instance_id}",
-    "force_flush_interval": 15
-  }
-}
-'@ | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
-```
-
----
-
-## **LANGKAH 4: START AGENT**
-
-```powershell
-# Start service
 Start-Service -Name "AmazonCloudWatchAgent"
-
-# Tunggu 10 detik untuk inisialisasi
-Start-Sleep -Seconds 10
+Start-Sleep -Seconds 5
 
 # Cek status
 Get-Service -Name "AmazonCloudWatchAgent"
+Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 5
 ```
 
----
+### **LANGKAH 4: Jika Berhasil, Update ke Versi Terbaru Agent**
 
-## **LANGKAH 5: VERIFIKASI**
-
-### **5.1 Cek Status Service**
+#### **Download Agent Terbaru:**
 ```powershell
-# Cek apakah service berjalan
-Get-Service -Name "AmazonCloudWatchAgent" | Format-Table Name, Status, DisplayName
-```
+# Download versi terbaru
+$url = "https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/amazon-cloudwatch-agent.msi"
+$output = "$env:TEMP\amazon-cloudwatch-agent.msi"
 
-### **5.2 Cek Process Agent**
-```powershell
-# Cek apakah process agent berjalan
-Get-Process -Name "AmazonCloudWatchAgent" -ErrorAction SilentlyContinue
-```
+Invoke-WebRequest -Uri $url -OutFile $output
 
-### **5.3 Cek Logs**
-```powershell
-# Lihat log terakhir (tunggu 30 detik dulu)
+# Install versi terbaru
+msiexec /i $output /quiet /norestart
+
+# Tunggu install selesai
 Start-Sleep -Seconds 30
-
-# Buka log file
-notepad "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log"
-
-# Atau lihat via PowerShell
-Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 20
 ```
 
-### **5.4 Test GPU Detection Manual**
-```powershell
-# Test apakah NVIDIA GPU terdeteksi
-nvidia-smi
+### **LANGKAH 5: Gunakan Konfigurasi yang BENAR untuk Versi Lama**
 
-# Test metrics spesifik
+Jika tidak bisa update, gunakan config ini yang kompatibel dengan versi lama:
+
+```powershell
+# Konfigurasi untuk agent versi lama
+$compatibleConfig = @'
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "debug": false
+  },
+  "metrics": {
+    "namespace": "GPU/Monitoring",
+    "metrics_collected": {
+      "telegraf": {
+        "telegraf_metrics_input_interval": "60s",
+        "telegraf_metrics_plugin_config": [
+          {
+            "name": "win_perf_counters",
+            "config": [
+              "[[inputs.win_perf_counters]]",
+              "  [[inputs.win_perf_counters.object]]",
+              "    ObjectName = \"GPU Engine\"",
+              "    Counters = [\"Utilization Percentage\"]",
+              "    Instances = [\"* engtype_3D\"]",
+              "    Measurement = \"gpu_utilization\""
+            ]
+          }
+        ]
+      },
+      "Processor": {
+        "measurement": ["% Processor Time"],
+        "metrics_collection_interval": 60
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}"
+    }
+  }
+}
+'@
+
+$compatibleConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+```
+
+### **LANGKAH 6: OPSI ALTERNATIF - Gunakan Custom Script + CloudWatch CLI**
+
+#### **6.1 Install AWS CLI:**
+```powershell
+# Download AWS CLI
+$msiUrl = "https://awscli.amazonaws.com/AWSCLIV2.msi"
+$msiPath = "$env:TEMP\AWSCLIV2.msi"
+Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
+
+# Install
+msiexec /i $msiPath /quiet /norestart
+```
+
+#### **6.2 Buat PowerShell Script untuk Monitor GPU:**
+```powershell
+# Save sebagai: C:\Scripts\Send-GPU-Metrics.ps1
+$gpuInfo = nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv,noheader,nounits
+$metrics = $gpuInfo -split ','
+
+# Parse metrics
+$gpu_util = [float]$metrics[0]
+$mem_util = [float]$metrics[1]
+$mem_used = [float]$metrics[2]
+$mem_total = [float]$metrics[3]
+$mem_free = [float]$metrics[4]
+
+# Get instance metadata
+$instanceId = Invoke-RestMethod -Uri "http://169.254.169.254/latest/meta-data/instance-id" -ErrorAction SilentlyContinue
+if (-not $instanceId) { $instanceId = "unknown" }
+
+# Send to CloudWatch
+aws cloudwatch put-metric-data `
+  --namespace "GPU/Monitoring" `
+  --metric-name "GPU_Utilization" `
+  --value $gpu_util `
+  --unit "Percent" `
+  --dimensions "InstanceId=$instanceId"
+
+aws cloudwatch put-metric-data `
+  --namespace "GPU/Monitoring" `
+  --metric-name "GPU_Memory_Utilization" `
+  --value $mem_util `
+  --unit "Percent" `
+  --dimensions "InstanceId=$instanceId"
+
+aws cloudwatch put-metric-data `
+  --namespace "GPU/Monitoring" `
+  --metric-name "GPU_Memory_Used" `
+  --value $mem_used `
+  --unit "Megabytes" `
+  --dimensions "InstanceId=$instanceId"
+
+aws cloudwatch put-metric-data `
+  --namespace "GPU/Monitoring" `
+  --metric-name "GPU_Memory_Total" `
+  --value $mem_total `
+  --unit "Megabytes" `
+  --dimensions "InstanceId=$instanceId"
+
+aws cloudwatch put-metric-data `
+  --namespace "GPU/Monitoring" `
+  --metric-name "GPU_Memory_Free" `
+  --value $mem_free `
+  --unit "Megabytes" `
+  --dimensions "InstanceId=$instanceId"
+
+Write-Host "Metrics sent: GPU=$gpu_util%, Memory=$mem_util%, Used=$mem_used MB, Total=$mem_total MB, Free=$mem_free MB"
+```
+
+#### **6.3 Buat Scheduled Task:**
+```powershell
+# Create scheduled task untuk run setiap menit
+$action = New-ScheduledTaskAction `
+  -Execute "PowerShell.exe" `
+  -Argument "-NoProfile -WindowStyle Hidden -File C:\Scripts\Send-GPU-Metrics.ps1"
+
+$trigger = New-ScheduledTaskTrigger `
+  -Once `
+  -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes 1)
+
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+
+Register-ScheduledTask `
+  -TaskName "GPU-Metrics-Collector" `
+  -Action $action `
+  -Trigger $trigger `
+  -Principal $principal `
+  -Description "Collect and send GPU metrics to CloudWatch"
+```
+
+### **LANGKAH 7: SOLUSI PALING SIMPLE - IAM Role + Simple Config**
+
+#### **7.1 Attach IAM Role ke EC2 (PENTING!):**
+1. Di AWS Console, **stop EC2 instance** dulu
+2. **Attach IAM Role** dengan policy:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": [
+           "cloudwatch:PutMetricData",
+           "cloudwatch:GetMetricData",
+           "cloudwatch:ListMetrics",
+           "logs:CreateLogGroup",
+           "logs:CreateLogStream",
+           "logs:PutLogEvents"
+         ],
+         "Resource": "*"
+       }
+     ]
+   }
+   ```
+3. Start instance kembali
+
+#### **7.2 Gunakan Config yang PASTI WORK:**
+```powershell
+# Config minimal tanpa NVIDIA plugin
+$workingConfig = @'
+{
+  "metrics": {
+    "namespace": "GPU/Monitoring",
+    "metrics_collected": {
+      "Processor": {
+        "measurement": ["% Processor Time"],
+        "metrics_collection_interval": 60
+      },
+      "Memory": {
+        "measurement": ["% Committed Bytes In Use"],
+        "metrics_collection_interval": 60
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}"
+    }
+  }
+}
+'@
+
+$workingConfig | Out-File "C:\ProgramData\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent.json" -Encoding UTF8 -Force
+
+# Restart agent
+Restart-Service -Name "AmazonCloudWatchAgent" -Force
+```
+
+### **LANGKAH 8: VERIFIKASI**
+
+```powershell
+# Cek agent status
+Get-Service -Name "AmazonCloudWatchAgent"
+
+# Cek logs
+Get-Content "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log" -Tail 10
+
+# Test GPU manual
 nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv
 ```
 
----
+## **REKOMENDASI:**
 
-## **LANGKAH 6: TROUBLESHOOTING**
+**Pilihan 1 (TERBAIK):** Update agent ke versi terbaru, lalu gunakan config `nvidia_gpu`
 
-### **Jika Agent Gagal Start:**
+**Pilihan 2:** Gunakan CloudWatch CLI dengan PowerShell script (jamin work)
 
-#### **6.1 Cek Error di Event Viewer:**
-```powershell
-# Buka Event Viewer
-eventvwr.msc
+**Pilihan 3:** Attach IAM Role dan gunakan config sederhana dulu
 
-# Atau cek via PowerShell
-Get-WinEvent -LogName "Application" | Where-Object {$_.ProviderName -like "*CloudWatch*"} | Select-Object -First 5 TimeCreated, LevelDisplayName, Message
-```
-
-#### **6.2 Test Konfigurasi:**
-```powershell
-# Navigasi ke folder agent
-cd "C:\Program Files\Amazon\AmazonCloudWatchAgent"
-
-# Test konfigurasi
-.\amazon-cloudwatch-agent-ctl.ps1 -a config
-```
-
-#### **6.3 Restart Manual:**
-```powershell
-# Stop
-Stop-Service -Name "AmazonCloudWatchAgent" -Force
-
-# Start ulang
-Start-Service -Name "AmazonCloudWatchAgent"
-```
-
----
-
-## **LANGKAH 7: TEST METRICS DI CLOUDWATCH**
-
-### **7.1 Tunggu 2-3 Menit** untuk data pertama masuk
-
-### **7.2 Cek di AWS Console:**
-1. Buka **AWS Management Console**
-2. Pilih **CloudWatch**
-3. Klik **Metrics** → **All metrics**
-4. Cari namespace: **`GPU/Monitoring`**
-5. Metrics yang harus muncul:
-   - `utilization_gpu`
-   - `utilization_memory`
-   - `memory_total`
-   - `memory_free`
-   - `memory_used`
-
-### **7.3 Atau Cek via AWS CLI:**
-```powershell
-# Install AWS CLI dulu jika belum
-# Download dari: https://aws.amazon.com/cli/
-
-# Configure AWS CLI
-aws configure
-
-# Cek metrics di CloudWatch
-aws cloudwatch list-metrics --namespace "GPU/Monitoring"
-```
-
----
-
-## **LANGKAH 8: MONITORING RUTIN**
-
-### **8.1 Buat Script Monitoring Sederhana:**
-```powershell
-# Save sebagai: C:\Scripts\monitor-gpu.ps1
-Write-Host "=== GPU Monitoring Status ===" -ForegroundColor Cyan
-
-# 1. Service Status
-$service = Get-Service -Name "AmazonCloudWatchAgent"
-Write-Host "Agent Status: $($service.Status)" -ForegroundColor $(if($service.Status -eq "Running"){"Green"}else{"Red"})
-
-# 2. Current GPU Metrics
-Write-Host "`nCurrent GPU Metrics:" -ForegroundColor Yellow
-nvidia-smi --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,memory.free --format=csv
-
-# 3. Log Check
-Write-Host "`nLatest Logs:" -ForegroundColor Yellow
-$logFile = "C:\ProgramData\Amazon\AmazonCloudWatchAgent\Logs\amazon-cloudwatch-agent.log"
-if (Test-Path $logFile) {
-    Get-Content $logFile -Tail 3
-}
-
-Write-Host "`nCheck CloudWatch Console:" -ForegroundColor Magenta
-Write-Host "Namespace: GPU/Monitoring" -ForegroundColor White
-```
-
-### **8.2 Jadwalkan Monitoring:**
-```powershell
-# Buat scheduled task (opsional)
-$action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-File C:\Scripts\monitor-gpu.ps1"
-$trigger = New-ScheduledTaskTrigger -Daily -At "9:00AM"
-Register-ScheduledTask -TaskName "GPU-Monitoring-Check" -Action $action -Trigger $trigger -Description "Check GPU Monitoring Status"
-```
+**Untuk sekarang, coba Pilihan 3 dulu** untuk pastikan agent bisa berjalan, baru kemudian upgrade atau tambah custom script.
